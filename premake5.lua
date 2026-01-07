@@ -61,6 +61,12 @@ newoption {
    description = "use clang-cl.exe instead of cl.exe"
 }
 
+-- TODO: won't be needed with premake5 beta 8
+newoption {
+   trigger = "with-2026",
+   description = "use vs2026 directory"
+}
+
 -- TODO: test this option
 -- usestandardpreprocessor 'On'
 
@@ -139,6 +145,16 @@ function optimized_conf()
   filter {}
 end
 
+-- TODO: temporary, create 2022 project in 2026
+-- directory and then needs manual retarget in vs2026
+-- in premake5 beta 8 (not yet released) vs2026 action
+-- is supported and we'll be able to switch to that
+function conf_2026()
+  filter { "options:with-2026" }
+    location "vs2026"
+  filter {}
+end
+
 -- per-workspace setting that differ in clang-cl.exe vs cl.exe builds
 function clang_conf()
   filter "options:with-clang"
@@ -214,7 +230,9 @@ workspace "SumatraPDF"
     location "vs2022"
   filter {}
 
+
   clang_conf()
+  conf_2026()
 
   filter {"platforms:x32", "configurations:Release"}
     targetdir "out/rel32"
@@ -287,7 +305,7 @@ workspace "SumatraPDF"
     optimized_conf()
     defines { "UNRAR", "RARDLL", "SILENT" }
     -- os.hpp redefines WINVER, is there a better way?
-    disablewarnings { "4005", "4100", "4201", "4211", "4244", "4310", "4389", "4456", "4459", "4505", "4701", "4702", "4706", "4709", "4731", "4996" } 
+    disablewarnings { "4005", "4100", "4201", "4211", "4244", "4310", "4389", "4456", "4459", "4505", "4701", "4702", "4706", "4709", "4731", "4996" }
     -- unrar uses exception handling in savepos.hpp but I don't want to enable it
     -- as it seems to infect the Sumatra binary as well (i.e. I see bad alloc exception
     -- being thrown)
@@ -423,7 +441,7 @@ workspace "SumatraPDF"
 
     -- libjpeg-turbo
     defines { "_CRT_SECURE_NO_WARNINGS" }
-    disablewarnings { "4018", "4100", "4244", "4245", "4819" }
+    disablewarnings { "4013", "4018", "4100", "4244", "4245", "4819" }
     includedirs { "ext/libjpeg-turbo", "ext/libjpeg-turbo/simd" }
     -- nasm.exe -I .\ext\libjpeg-turbo\simd\
     -- -I .\ext\libjpeg-turbo\win\ -f win32
@@ -466,6 +484,7 @@ workspace "SumatraPDF"
       "FT2_BUILD_LIBRARY",
       "FT_CONFIG_MODULES_H=\"slimftmodules.h\"",
       "FT_CONFIG_OPTIONS_H=\"slimftoptions.h\"",
+      "FT_CONFIG_OPTION_USE_BROTLI",
     }
     disablewarnings { "4018", "4100", "4101", "4244", "4267", "4312", "4701", "4706", "4996" }
     includedirs { "mupdf/scripts/freetype", "ext/freetype/include" }
@@ -499,7 +518,7 @@ workspace "SumatraPDF"
     files { "ext/mujs/one.c", "ext/mujs/mujs.h" }
 
     -- gumbo
-    disablewarnings { "4018", "4100", "4132", "4204", "4244", "4245", "4267", 
+    disablewarnings { "4018", "4100", "4132", "4204", "4244", "4245", "4267",
     "4305", "4306", "4389", "4456", "4701" }
     includedirs { "ext/gumbo-parser/include", "ext/gumbo-parser/visualc/include" }
     gumbo_files()
@@ -510,7 +529,11 @@ workspace "SumatraPDF"
     uses_zlib()
     extract_files()
 
-    -- iibheif
+    -- brotli
+    includedirs { "ext/brotli/c/include" }
+    brotli_files()
+
+    -- libheif
     defines { "LIBHEIF_STATIC_BUILD" }
 
   function fonts()
@@ -581,14 +604,14 @@ workspace "SumatraPDF"
     -- this defines which fonts are to be excluded from being included directly
     -- we exclude the very big cjk fonts
     defines { "TOFU_NOTO", "TOFU_CJK_LANG", "TOFU_NOTO_SUMATRA" }
-    defines { "FZ_ENABLE_SVG=1", "FZ_ENABLE_BROTLI=0", "FZ_ENABLE_BARCODE=0" }
+    defines { "FZ_ENABLE_SVG=1", "FZ_ENABLE_BROTLI=1", "FZ_ENABLE_BARCODE=0", "FZ_ENABLE_JS=0", "FZ_ENABLE_HYPHEN=0" }
 
     filter { "platforms:arm64" }
         defines { "ARCH_HAS_NEON=1" }
     filter {}
 
     disablewarnings {
-      "4005", "4018", "4057", "4100", "4115", "4130", "4132", "4200", "4204", "4206", "4210", 
+      "4005", "4013", "4018", "4057", "4100", "4115", "4130", "4132", "4200", "4204", "4206", "4210",
       "4245", "4267", "4295", "4305", "4389", "4456", "4457", "4703", "4706", "4819", "5286"
     }
     -- force including mupdf/scripts/openjpeg/opj_config_private.h
@@ -604,12 +627,14 @@ workspace "SumatraPDF"
       "mupdf/scripts/freetype",
       "ext/freetype/include",
       "ext/mujs",
+      "ext/brotli/c/include",
       "ext/harfbuzz/src",
       "ext/lcms2/include",
       "ext/gumbo-parser/src",
       "ext/extract/include",
     }
     fonts()
+
 
     mupdf_files()
     links { "mupdf-libs" }
@@ -625,7 +650,7 @@ workspace "SumatraPDF"
     language "C"
     optimized_conf()
     disablewarnings { "4206", "4702" }
-    defines { "FZ_ENABLE_SVG=1", "FZ_ENABLE_BROTLI=0", "FZ_ENABLE_BARCODE=0" }
+    defines { "FZ_ENABLE_SVG=1", "FZ_ENABLE_BROTLI=1", "FZ_ENABLE_BARCODE=0", "FZ_ENABLE_JS=0", "FZ_ENABLE_HYPHEN=0" }
 
     filter { "platforms:arm64" }
         defines { "ARCH_HAS_NEON=1" }
@@ -918,8 +943,9 @@ workspace "MakeLZSA"
   filter "action:vs2022"
     location "vs2022"
   filter {}
-  
+
   clang_conf()
+  conf_2026()
 
   filter {"platforms:x32", "configurations:Release"}
     targetdir "out/rel32"

@@ -26,7 +26,6 @@ struct Annotation;
 struct ILinkHandler;
 
 // Current action being performed with a mouse
-// clang-format off
 enum class MouseAction {
     None = 0,
     Dragging,
@@ -34,16 +33,13 @@ enum class MouseAction {
     Scrolling,
     SelectingText
 };
-// clang-format on
 
-// clang-format off
 enum PresentationMode {
     PM_DISABLED = 0,
     PM_ENABLED,
     PM_BLACK_SCREEN,
     PM_WHITE_SCREEN
 };
-// clang-format on
 
 // WM_GESTURE handling
 struct TouchState {
@@ -168,6 +164,11 @@ struct MainWindow {
     HBITMAP bmpMovePattern = nullptr;
     HBRUSH brMovePattern = nullptr;
     Annotation* annotationBeingDragged = nullptr;
+
+    // Vars for resizing annotations
+    int resizeHandle = 0; // ResizeHandle enum casted to int
+    bool annotationBeingResized = false;
+    RectF annotationOriginalRect;
 
     /* when moving the document by smooth scrolling, this keeps track of
        the speed at which we should scroll, which depends on the distance

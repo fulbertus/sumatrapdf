@@ -665,7 +665,11 @@ static bool ShouldSaveThumbnail(FileState* ds) {
 
     // don't create thumbnails for files that won't need them anytime soon
     Vec<FileState*> list;
-    gFileHistory.GetFrequencyOrder(list);
+    if (gGlobalPrefs->homePageSortByFrequentlyRead) {
+        gFileHistory.GetFrequencyOrder(list);
+    } else {
+        gFileHistory.GetRecentlyOpenedOrder(list);
+    }
     int idx = list.Find(ds);
     if (idx < 0 || kFileHistoryMaxFrequent * 2 <= idx) {
         return false;
@@ -806,10 +810,18 @@ void ControllerCallbackHandler::SaveDownload(const char* url, const ByteSlice& d
     SaveDataToFile(win->hwndFrame, path, data);
 }
 
+static void makeFullScrollbar(SCROLLINFO& si) {
+    si.nPos = 0;
+    si.nMin = 0;
+    si.nMax = 99;
+    si.nPage = 100;
+}
+
 void ControllerCallbackHandler::UpdateScrollbars(Size canvas) {
     ReportIf(!win->AsFixed());
     DisplayModel* dm = win->AsFixed();
 
+    bool hideScrollbar = gGlobalPrefs->fixedPageUI.hideScrollbars;
     SCROLLINFO si{};
     si.cbSize = sizeof(si);
     si.fMask = SIF_ALL;
@@ -817,37 +829,48 @@ void ControllerCallbackHandler::UpdateScrollbars(Size canvas) {
     Size viewPort = dm->GetViewPort().Size();
 
     if (viewPort.dx >= canvas.dx) {
-        si.nPos = 0;
-        si.nMin = 0;
-        si.nMax = 99;
-        si.nPage = 100;
+        makeFullScrollbar(si);
     } else {
         si.nPos = dm->GetViewPort().x;
         si.nMin = 0;
         si.nMax = canvas.dx - 1;
         si.nPage = viewPort.dx;
     }
-    ShowScrollBar(win->hwndCanvas, SB_HORZ, viewPort.dx < canvas.dx);
+
+    bool showHScroll = (viewPort.dx < canvas.dx) && !hideScrollbar;
+    ShowScrollBar(win->hwndCanvas, SB_HORZ, showHScroll);
     SetScrollInfo(win->hwndCanvas, SB_HORZ, &si, TRUE);
 
-    if (viewPort.dy >= canvas.dy) {
-        si.nPos = 0;
+    bool isSinglePageMode = (dm->GetDisplayMode() == DisplayMode::SinglePage);
+    bool showVScroll = true;
+    if (isSinglePageMode) {
+        int pageCount = dm->PageCount();
+        int currentPage = dm->CurrentPageNo();
+        si.nPos = currentPage - 1; // 0-based position
         si.nMin = 0;
-        si.nMax = 99;
-        si.nPage = 100;
+        si.nMax = pageCount - 1; // 0-based max
+        si.nPage = 1;            // One page visible at a time
     } else {
-        si.nPos = dm->GetViewPort().y;
-        si.nMin = 0;
-        si.nMax = canvas.dy - 1;
-        si.nPage = viewPort.dy;
+        if (viewPort.dy >= canvas.dy) {
+            makeFullScrollbar(si);
+        } else {
+            si.nPos = dm->GetViewPort().y;
+            si.nMin = 0;
+            si.nMax = canvas.dy - 1;
+            si.nPage = viewPort.dy;
 
-        if (kZoomFitPage != dm->GetZoomVirtual()) {
-            // keep the top/bottom 5% of the previous page visible after paging down/up
-            si.nPage = (uint)(si.nPage * 0.95);
-            si.nMax -= viewPort.dy - si.nPage;
+            if (kZoomFitPage != dm->GetZoomVirtual()) {
+                // keep the top/bottom 5% of the previous page visible after paging down/up
+                si.nPage = (uint)(si.nPage * 0.95);
+                si.nMax -= viewPort.dy - si.nPage;
+            }
         }
+        showVScroll = (viewPort.dy < canvas.dy);
     }
-    ShowScrollBar(win->hwndCanvas, SB_VERT, viewPort.dy < canvas.dy);
+    if (hideScrollbar) {
+        showVScroll = false;
+    }
+    ShowScrollBar(win->hwndCanvas, SB_VERT, showVScroll);
     SetScrollInfo(win->hwndCanvas, SB_VERT, &si, TRUE);
 }
 
@@ -2139,7 +2162,11 @@ void LoadModelIntoTab(WindowTab* tab) {
     win->RedrawAll(true);
 }
 
-enum class MeasurementUnit { pt, mm, in };
+enum class MeasurementUnit {
+    pt,
+    mm,
+    in
+};
 
 static TempStr FormatCursorPositionTemp(EngineBase* engine, PointF pt, MeasurementUnit unit) {
     if (pt.x < 0) {
@@ -2642,6 +2669,8 @@ void CloseTab(WindowTab* tab, bool quitIfLast) {
         return;
     }
     MainWindow* win = tab->win;
+    logf("CloseTab: tab: 0x%p win: 0x%p, hwndFrame: 0x%x, quitIfLast: %d\n", tab, win, win->hwndFrame, (int)quitIfLast);
+
     AbortFinding(win, true);
     ClearFindBox(win);
     RemoveNotificationsForGroup(win->hwndCanvas, kNotifPageInfo);
@@ -2690,10 +2719,14 @@ void CloseTab(WindowTab* tab, bool quitIfLast) {
 // are other windows, else the Frequently Read page is displayed
 void CloseCurrentTab(MainWindow* win, bool quitIfLast) {
     WindowTab* tab = win->CurrentTab();
-    if (!tab) {
-        return;
+    logf("CloseCurrentTab: tab: 0x%p win: 0x%p, hwndFrame: 0x%x, quitIfLast: %d\n", tab, win, win->hwndFrame,
+         (int)quitIfLast);
+    if (tab) {
+        CloseTab(tab, quitIfLast);
+    } else {
+        // Close tabless Frequently Read/About page
+        CloseWindow(win, true, false);
     }
-    CloseTab(tab, quitIfLast);
 }
 
 bool CanCloseWindow(MainWindow* win) {
@@ -2726,7 +2759,8 @@ void CloseWindow(MainWindow* win, bool quitIfLast, bool forceClose) {
     if (!win) {
         return;
     }
-
+    logf("CloseWindow: win: 0x%p, hwndFrame: 0x%x, quitIfLast: %d, forceClose: %d\n", win, win->hwndFrame,
+         (int)quitIfLast, (int)forceClose);
     ReportIf(forceClose && !quitIfLast);
     if (forceClose) {
         quitIfLast = true;
@@ -3115,7 +3149,7 @@ static void CreateLnkShortcut(MainWindow* win) {
 
     const WCHAR* defExt = ToWStrTemp(ctrl->GetDefaultFileExt());
 
-    WCHAR dstFileName[MAX_PATH] = {0};
+    WCHAR dstFileName[MAX_PATH] = {};
     // Remove the extension so that it can be replaced with .lnk
     auto name = path::GetBaseNameTemp(path);
     str::BufSet(dstFileName, dimof(dstFileName), name);
@@ -4291,7 +4325,7 @@ static void OnFrameKeyEsc(MainWindow* win) {
         return;
     }
     if (gGlobalPrefs->escToExit && CanCloseWindow(win)) {
-        CloseWindow(win, true, false);
+        CloseCurrentTab(win, true);
         return;
     }
 }
@@ -4617,11 +4651,11 @@ void SetSidebarVisibility(MainWindow* win, bool tocVisible, bool showFavorites) 
     RelayoutFrame(win, false);
 }
 
-constexpr int kMaxURLLen = 1500;
-
 // if url-encoded s is bigger than a reasonable URL path,
 // we don't want to fail but truncate and encode less
 static TempStr URLEncodeMayTruncateTemp(const char* s) {
+    constexpr int kMaxURLLen = 1500;
+
     HRESULT hr;
     DWORD diff;
     WCHAR buf[kMaxURLLen + 1]{};
@@ -5943,7 +5977,14 @@ static LRESULT FrameOnCommand(MainWindow* win, HWND hwnd, UINT msg, WPARAM wp, L
                 SetAnnotCreateArgs(args, cmd);
                 auto annot = MakeAnnotationsFromSelection(tab, &args);
                 if (annot) {
-                    bool openEdit = GetCommandBoolArg(cmd, kCmdArgOpenEdit, IsShiftPressed());
+                    // for built-in shortcuts, Shift also opens edit window
+                    // don't apply that to user shortcuts
+                    // https://github.com/sumatrapdfreader/sumatrapdf/discussions/5209
+                    bool defVal = IsShiftPressed();
+                    if (cmd) {
+                        defVal = false;
+                    }
+                    bool openEdit = GetCommandBoolArg(cmd, kCmdArgOpenEdit, defVal);
                     if (openEdit) {
                         ShowEditAnnotationsWindow(tab);
                         SetSelectedAnnotation(tab, annot);

@@ -17,7 +17,7 @@ import (
 
 // we delete old daily and pre-release builds. This defines how many most recent
 // builds to retain
-const nBuildsToRetainPreRel = 5
+const nBuildsToRetainPreRel = 20
 
 type BuildType string
 
@@ -236,7 +236,7 @@ var sumLatestInstallerArm64 = "{{.Host}}/{{.Prefix}}-arm64-install.exe";
 
 `
 	sha1 := getGitSha1()
-	d := map[string]interface{}{
+	d := map[string]any{
 		"Host":     host,
 		"Ver":      ver,
 		"Sha1":     sha1,
